@@ -1,3 +1,10 @@
+# Ignore all data, model and outpu files
+model_data
+train_data
+output
+out_*
+
+
 # Initially taken from Github's Python gitignore file
 
 # Byte-compiled / optimized / DLL files
