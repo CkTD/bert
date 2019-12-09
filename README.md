@@ -2,20 +2,29 @@ Use bert to label event trigger. GPU version.
 
 Some code from https://github.com/HaoyuHu/bert-multi-gpu
 
-1. convert data
-    run convert_data.py to convert raw json to tsv data and some useful files for event trigger labeling.
-    - output_prefix.tsv     tsv data for train/eval/predict
-    - output_prefix.events  all events_types(labels) 
-    - output_prefix.counts  #tokens of each event_types(in same order of .events file)
-    - output_prefix.weights weights for loss(in same order of .events file)
-2. train
-    run command in TRAIN
-3. eval
-    run command in EVAL(Use the model saved by train)
-    run anal_confusion_matrix.py to check the confusion matrix, get precision, recall , f1
-4. predict
-    run command in PREDICT
-    run anal_prediction_result.py to check bad predictions 
+**convert data**
+
+run convert_data.py to convert raw json to tsv data and some useful files for event trigger labeling.
+- output_prefix.tsv     tsv data for train/eval/predict
+- output_prefix.events  all events_types(labels) 
+- output_prefix.counts  #tokens of each event_types(in same order of .events file)
+- output_prefix.weights weights for loss(in same order of .events file)
+
+**train** 
+
+run command in TRAIN
+    
+**eval** 
+
+run command in EVAL(Use the model saved by train)
+
+run anal_confusion_matrix.py to check the confusion matrix, get precision, recall , f1
+    
+**predict** 
+
+run command in PREDICT
+
+run anal_prediction_result.py to check bad predictions 
 
 
 
