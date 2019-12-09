@@ -595,7 +595,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
                                                              # real_seq_len is the orig token len, which is also the real labels length
     hidden_size = output_layer.shape[-1].value
 
-    mid_size = 4096
+    mid_size = 4096 
 
     output_mid_weights = tf.get_variable(
         "output_mid_weights", [mid_size, hidden_size],
@@ -639,6 +639,12 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
 
         #orig_to_tok_map # [batch_size, seq_len]
         logits = tf.batch_gather(logits, orig_to_tok_map)                   # [ batch_size, seq_len, num_labels]
+
+
+        # prevent nan loss during training.
+        #epsilon = tf.constant(value=1e-8, shape=logist.shape)
+        #logist = logist + epsilon
+        logits = tf.clip_by_value(logits, 1e-10, 1e10)
 
         log_probs = tf.nn.log_softmax(logits, axis=-1)                      #[ batch_size, seq_len, num_labels]
         predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)      #[ batch_size, seq_len]
@@ -720,10 +726,15 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
             else:
                 train_op = optimization.create_optimizer(
                     total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
+                # Let TPUEstimator print loss during train
+                # use a logging hook. 
+                # see https://github.com/google-research/bert/issues/70
+                logging_hook = tf.train.LoggingTensorHook({"loss": total_loss}, every_n_iter=1)
                 output_spec = tf.contrib.tpu.TPUEstimatorSpec(
                     mode=mode,
                     loss=total_loss,
                     train_op=train_op,
+                    training_hooks=[logging_hook],
                     scaffold_fn=scaffold_fn)
         elif mode == tf.estimator.ModeKeys.EVAL:
             
