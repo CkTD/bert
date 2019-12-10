@@ -355,7 +355,7 @@ class EETrigerProcessor(DataProcessor):
                 "Execute", "Sentence", "Be-Born", "Charge-Indict", "Declare-Bankruptcy", "Convict", 
                 "Release-Parole", "Pardon", "Appeal", "Merge-Org", "Divorce", "Acquit", "Extradite"]
     
-    def get_loss_weights(self)
+    def get_loss_weights(self):
         w = [0.0008921577807340673, 1.628400340944748e-06, 0.0034411800114028308, 
              0.0060912841581153565, 0.04817652015963964, 0.0004120853201835428, 
              0.00281883894551083, 0.0022842315592932587, 0.008280339402438063, 
@@ -633,8 +633,9 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
     output_bias = tf.get_variable(
         "output_bias", [num_labels], initializer=tf.zeros_initializer())
 
-    assert len(weights) == num_labels
-    loss_weights = tf.constant(loss_weights,dtype=tf.float32)
+    if loss_weights is not None:
+        assert len(loss_weights) == num_labels
+        loss_weights = tf.constant(loss_weights,dtype=tf.float32)
 
     with tf.variable_scope("loss"):
         if is_training:
@@ -663,7 +664,8 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
         log_probs = tf.nn.log_softmax(logits, axis=-1)                      #[ batch_size, seq_len, num_labels]
         predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)      #[ batch_size, seq_len]
 
-        log_probs = log_probs * loss_weights
+        if loss_weights is not None:
+            log_probs = log_probs * loss_weights
 
         mask = tf.expand_dims(output_mask, -1)                              # [batch_size, seq_len, 1]
         log_probs = log_probs * mask                                        # [ batch_size, seq_len, num_labels]
@@ -856,7 +858,7 @@ def main(_):
     processor = processors[task_name]()
 
     label_list = processor.get_labels()
-    loss_weights = processor.get_loss_weights() if hasattr(processor, get_loss_weights) else None
+    loss_weights = processor.get_loss_weights() if hasattr(processor, "get_loss_weights") else None
     
     tokenizer = tokenization.FullTokenizer(
         vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
