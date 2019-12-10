@@ -22,6 +22,7 @@ import collections
 import csv
 import os
 import datetime
+import math
 
 import tensorflow as tf
 
@@ -353,6 +354,27 @@ class EETrigerProcessor(DataProcessor):
                 "Trial-Hearing", "Start-Org", "Sue", "Transfer-Ownership", "Arrest-Jail", "Phone-Write", 
                 "Execute", "Sentence", "Be-Born", "Charge-Indict", "Declare-Bankruptcy", "Convict", 
                 "Release-Parole", "Pardon", "Appeal", "Merge-Org", "Divorce", "Acquit", "Extradite"]
+    
+    def get_loss_weights(self)
+        w = [0.0008921577807340673, 1.628400340944748e-06, 0.0034411800114028308, 
+             0.0060912841581153565, 0.04817652015963964, 0.0004120853201835428, 
+             0.00281883894551083, 0.0022842315592932587, 0.008280339402438063, 
+             0.009635304031927928, 0.02523532008362076, 0.0010556608003108288, 
+             0.004529416425265265, 0.015586521228118705, 0.003354061530101494, 
+             0.006542490392049827, 0.01394583478305358, 0.008547447125097356, 
+             0.004774249745549874, 0.008280339402438063, 0.005195507076039569, 
+             0.03312135760975225, 0.006794124637897898, 0.01152047221208774, 
+             0.005954401368045348, 0.022080905073168167, 0.01059883443512072, 
+             0.013588249275795796, 0.264970860878018, 0.015586521228118705, 
+             0.037852980125431146, 0.02789166956610716, 0.1059883443512072,
+             0.264970860878018]
+        w = [math.sqrt(x) for x in w]
+        s = sum(w)
+        w = [x/s for x in w]
+        w = [x * len(w) * 50 for x in w]
+        print("Weights: \n", w)
+        
+        return w
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
@@ -572,7 +594,7 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
 
 
 def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, label_ids, orig_to_tok_map,
-                 output_mask, num_labels, use_one_hot_embeddings, fp16):
+                 output_mask, num_labels, use_one_hot_embeddings, fp16, loss_weights):
     """Creates a classification model."""
     comp_type = tf.float16 if fp16 else tf.float32
     model = modeling.BertModel(
@@ -611,16 +633,8 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
     output_bias = tf.get_variable(
         "output_bias", [num_labels], initializer=tf.zeros_initializer())
 
-    import math
-    www = [0.0008921577807340673, 1.628400340944748e-06, 0.0034411800114028308, 0.0060912841581153565, 0.04817652015963964, 0.0004120853201835428, 0.00281883894551083, 0.0022842315592932587, 0.008280339402438063, 0.009635304031927928, 0.02523532008362076, 0.0010556608003108288, 0.004529416425265265, 0.015586521228118705, 0.003354061530101494, 0.006542490392049827, 0.01394583478305358, 0.008547447125097356, 0.004774249745549874, 0.008280339402438063, 0.005195507076039569, 0.03312135760975225, 0.006794124637897898, 0.01152047221208774, 0.005954401368045348, 0.022080905073168167, 0.01059883443512072, 0.013588249275795796, 0.264970860878018, 0.015586521228118705, 0.037852980125431146, 0.02789166956610716, 0.1059883443512072, 0.264970860878018]
-    print("WWW: \n", www)
-    www = [math.sqrt(x) for x in www]
-    s = sum(www)
-    www = [x/s for x in www]
-    print("WWW: \n", www)
-    www = [x * len(www) * 50 for x in www]
-    assert len(www) == num_labels
-    www = tf.constant(www,dtype=tf.float32)
+    assert len(weights) == num_labels
+    loss_weights = tf.constant(loss_weights,dtype=tf.float32)
 
     with tf.variable_scope("loss"):
         if is_training:
@@ -649,7 +663,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
         log_probs = tf.nn.log_softmax(logits, axis=-1)                      #[ batch_size, seq_len, num_labels]
         predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)      #[ batch_size, seq_len]
 
-        log_probs = log_probs * www
+        log_probs = log_probs * loss_weights
 
         mask = tf.expand_dims(output_mask, -1)                              # [batch_size, seq_len, 1]
         log_probs = log_probs * mask                                        # [ batch_size, seq_len, num_labels]
@@ -665,7 +679,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
 
 def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
-                     use_one_hot_embeddings, use_gpu, num_gpu_cores, fp16):
+                     use_one_hot_embeddings, use_gpu, num_gpu_cores, fp16, loss_weights):
     """Returns `model_fn` closure for TPUEstimator."""
 
     def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
@@ -688,7 +702,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
         (total_loss, per_example_loss, predictions) = create_model(
             bert_config, is_training, input_ids, input_mask, segment_ids, label_ids, orig_to_tok_map, output_mask_float,
-            num_labels, use_one_hot_embeddings, fp16)
+            num_labels, use_one_hot_embeddings, fp16, loss_weights)
 
         tvars = tf.trainable_variables()
         
@@ -842,7 +856,8 @@ def main(_):
     processor = processors[task_name]()
 
     label_list = processor.get_labels()
-
+    loss_weights = processor.get_loss_weights() if hasattr(processor, get_loss_weights) else None
+    
     tokenizer = tokenization.FullTokenizer(
         vocab_file=FLAGS.vocab_file, do_lower_case=FLAGS.do_lower_case)
 
@@ -897,7 +912,8 @@ def main(_):
         use_one_hot_embeddings=FLAGS.use_tpu,
         use_gpu=FLAGS.use_gpu,
         num_gpu_cores=FLAGS.num_gpu_cores,
-        fp16=FLAGS.use_fp16)
+        fp16=FLAGS.use_fp16,
+        loss_weights=loss_weights)
 
     # If TPU is not available, this will fall back to normal Estimator on CPU
     # or GPU.
