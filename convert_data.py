@@ -86,20 +86,19 @@ def eet_do_statistic(examples, events):
 
 def eea_do_statistic(examples, arguments):
   label_count = {}
+  total_token = 0
   for label in arguments:
     label_count[label] = 0
   for _, trigger_start, trigger_end, _, labels in examples:
+    total_token += len(labels)
     for label in labels:
       for each_label in label:
         label_count[each_label] += 1
 
   counts = [label_count[x] for x in arguments]
-  s=sum(counts)
-  i_weights = [s/x for x in counts]
-  s=sum(i_weights)
-  i_weights = [x/s for x in i_weights]
-  
-  return counts, i_weights
+  weights = [x/total_token for x in counts]
+  print("#Tokens for eea:", total_token)
+  return counts, weights
 
 def write_examples_to_tsv(examples, path):
   with  open(path, 'w') as f:
@@ -127,6 +126,11 @@ def write_json_to_file(weights, path):
 if __name__ == '__main__':
     if len(sys.argv) != 4:
         print("usage convert_data.py input_file eet_output_prefix eea_output_prefix")
+        print("EETriger .tsv format:\n"
+              "\t Each line: Tokens TAB Labels\n"
+              "EEArgument .tsv format:\n"
+              "\t Each line: Tokens TAB Trigger_start_idx TAB Trigger_end_idx TAB Event_type TAB Token1_roles TAB Token2_roles TAB ... Tokenn_roles"
+        )
         exit()
 
     input_file = sys.argv[1]
@@ -145,9 +149,9 @@ if __name__ == '__main__':
     write_json_to_file(event_i_weights, eet_base + ".i_weights")
     write_json_to_file(event_counts, eet_base + ".counts")
 
-    argument_counts, argument_i_weights = eea_do_statistic(eea_examples, argument_types)
+    argument_counts, argument_weights = eea_do_statistic(eea_examples, argument_types)
     write_examples_to_tsv(eea_examples, eea_base + ".tsv")
     write_json_to_file(argument_types, eea_base + ".argument_types")
-    write_json_to_file(argument_i_weights, eea_base + ".i_weights")
+    write_json_to_file(argument_weights, eea_base + ".weights")
     write_json_to_file(argument_counts, eea_base + ".counts")
 

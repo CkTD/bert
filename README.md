@@ -4,11 +4,18 @@ Some code from https://github.com/HaoyuHu/bert-multi-gpu
 
 **convert data**
 
-run convert_data.py to convert raw json to tsv data and some useful files for event trigger labeling.
-- output_prefix.tsv     tsv data for train/eval/predict
-- output_prefix.events  all events_types(labels) 
-- output_prefix.counts  #tokens of each event_types(in same order of .events file)
-- output_prefix.weights weights for loss(in same order of .events file)
+run convert_data.py to convert raw json to tsv data and some useful files for event trigger and argument labeling.
+
+    python convert_data.py data/ACE2005/train.json data/eet/train data/eea/train
+
+- data/eet/XXX.tsv tsv data for event trigger.  XXX can be train/eval/test
+- data/eet/XXX.event_types all events_types(trigger labels)
+- data/eet/XXX.counts #tokens of each event_types(in same order of .event_types file)
+- data/eet/XXX.i_weights invert weights for loss of each event type(in same order of .event_types file)
+- data/eea/XXX.tsv tsv data for event argument. XXX can be train/eval/test
+- data/eea/XXX.argument_types all argument roles. (argument labels)
+- data/eea/XXX.counts #tokens of each argument_types
+- data/eea/XXX.weights positive data percentage of each argument role(in same order of .argument_types file)
 
 **train** 
 

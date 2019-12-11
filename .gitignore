@@ -1,6 +1,6 @@
 # Ignore all data, model and outpu files
 model_data
-train_data
+data
 output
 out_*
 
