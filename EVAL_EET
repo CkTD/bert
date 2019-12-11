@@ -1,0 +1,19 @@
+python run_custom_seq_labeling.py \
+  --task_name=eet \
+  --do_lower_case=true \
+  --do_train=false \
+  --do_eval=true \
+  --do_predict=false \
+  --save_for_serving=false \
+  --data_dir=.data/eet \
+  --vocab_file=./model_data/uncased_L-12_H-768_A-12/vocab.txt \
+  --bert_config_file=./model_data/uncased_L-12_H-768_A-12/bert_config.json \
+  --init_checkpoint=./output/model.ckpt-10602 \
+  --max_seq_length=128 \
+  --train_batch_size=32 \
+  --learning_rate=5e-5 \
+  --num_train_epochs=50 \
+  --use_gpu=true \
+  --num_gpu_cores=1 \
+  --use_fp16=true \
+  --output_dir=./output

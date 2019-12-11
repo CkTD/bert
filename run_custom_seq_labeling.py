@@ -25,6 +25,7 @@ import datetime
 import math
 
 import tensorflow as tf
+import numpy as np
 
 import custom_modeling as modeling
 import optimization
@@ -150,15 +151,17 @@ flags.DEFINE_bool("use_fp16", False, "Whether to use fp16.")
 class InputExample(object):
     """A single training/test example for simple sequence classification."""
 
-    def __init__(self, guid, tokens_a, labels):
+    def __init__(self, guid, tokens_a, labels, seg2_pos=None):
         """Constructs a InputExample.
 
         Args:
           guid: Unique id for the example.
+          seg2_pos: when do event argument labeling, we want trigger have different segment_id
         """
         self.guid = guid
         self.tokens_a = tokens_a
         self.labels = labels
+        self.seg2_pos = seg2_pos
 
 
 class InputFeatures(object):
@@ -203,134 +206,10 @@ class DataProcessor(object):
                 lines.append(line)
             return lines
 
-
-class PunctProcessor(DataProcessor):
-    """Processor for the NamedEntity data set."""
-
-    def get_train_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
-
-    def get_dev_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
-
-    def get_test_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
-
-    def get_labels(self):
-        """See base class."""
-        return ["C", "P", "Q", "E", "D", "O"]
-
-    def _create_examples(self, lines, set_type):
-        """Creates examples for the training and dev sets."""
-        examples = []
-        for (i, line) in enumerate(lines):
-            # Ignore the first line.
-            # if i == 0:
-            #     continue
-            guid = "%s-%s" % (set_type, i)
-            tokens_a = tokenization.convert_to_unicode(line[0])
-            if set_type == "test":
-                labels = ' '.join(["0"] * len(tokens_a.split()))
-            else:
-                labels = tokenization.convert_to_unicode(line[1])
-            examples.append(
-                InputExample(guid=guid, tokens_a=tokens_a, labels=labels))
-        return examples
-
-
-class NormProcessor(DataProcessor):
-    """Processor for the NamedEntity data set."""
-
-    def get_train_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
-
-    def get_dev_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
-
-    def get_test_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
-
-    def get_labels(self):
-        """See base class."""
-        return ["O", "I-n", "B-n", "I-c", "I-inter_n", "I-inter_d", "I-d", "B-c", "B-inter_n", "I-s", "B-d", "I-t",
-                "I-per", "B-sil", "I-tel", "I-temp", "I-alter", "I-frac", "I-form", "B-inter_d", "B-per", "B-s",
-                "B-frac", "B-t", "B-temp", "I-inter_t", "I-inter_temp", "B-alter", "B-tel", "I-fraction", "B-form",
-                "I-sil", "I-inter_c", "I-inter_per", "B-fraction", "I-inter_frac", "B-inter_t", "B-inter",
-                "B-inter_temp", "I-inter_s", "B-inter_c", "I-inter_fraction", "I-block", "I-inter", "B-inter_frac",
-                "B-inter_per", "B-block", "B-inter_s"]
-
-    def _create_examples(self, lines, set_type):
-        """Creates examples for the training and dev sets."""
-        examples = []
-        for (i, line) in enumerate(lines):
-            # Ignore the first line.
-            # if i == 0:
-            #     continue
-            guid = "%s-%s" % (set_type, i)
-            tokens_a = tokenization.convert_to_unicode(line[0])
-            if set_type == "test":
-                labels = ' '.join(["0"] * len(tokens_a.split()))
-            else:
-                labels = tokenization.convert_to_unicode(line[1])
-            examples.append(
-                InputExample(guid=guid, tokens_a=tokens_a, labels=labels))
-        return examples
-
-
-class NamedEntityProcessor(DataProcessor):
-    """Processor for the NamedEntity data set."""
-
-    def get_train_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
-
-    def get_dev_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
-
-    def get_test_examples(self, data_dir):
-        """See base class."""
-        return self._create_examples(
-            self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
-
-    def get_labels(self):
-        """See base class."""
-        return ["B-o", "M-o", "E-o", "S-o"]
-
-    def _create_examples(self, lines, set_type):
-        """Creates examples for the training and dev sets."""
-        examples = []
-        for (i, line) in enumerate(lines):
-            # Ignore the first line.
-            # if i == 0:
-            #     continue
-            guid = "%s-%s" % (set_type, i)
-            tokens_a = tokenization.convert_to_unicode(line[0])
-            if set_type == "test":
-                labels = ' '.join(["0"] * len(tokens_a.split()))
-            else:
-                labels = tokenization.convert_to_unicode(line[1])
-            examples.append(
-                InputExample(guid=guid, tokens_a=tokens_a, labels=labels))
-        return examples
-
-
 class EETrigerProcessor(DataProcessor):
-    """Processor for the NamedEntity data set."""
+    """Processor for the Event Extraction (Trigger) data set."""
+    def get_task_type(self):
+        return "MCC"  # multi-class classification
 
     def get_train_examples(self, data_dir):
         """See base class."""
@@ -378,6 +257,7 @@ class EETrigerProcessor(DataProcessor):
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
+        # multi-class classification.
         examples = []
         for (i, line) in enumerate(lines):
             # Ignore the first line.
@@ -394,15 +274,108 @@ class EETrigerProcessor(DataProcessor):
                 InputExample(guid=guid, tokens_a=tokens_a, labels=labels))
         return examples
 
+class EEArgumentProcessor(DataProcessor):
+    """Processor for the Event Extraction (Argument) data set."""
+    def get_task_type(self):
+        return "MBCC"  # multi binary-class classification
+
+    def get_train_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "train.tsv")), "train")
+
+    def get_dev_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "dev.tsv")), "dev")
+
+    def get_test_examples(self, data_dir):
+        """See base class."""
+        return self._create_examples(
+            self._read_tsv(os.path.join(data_dir, "test.tsv")), "test")
+
+    def get_labels(self):
+        """See base class."""
+        return ["Destination", "Vehicle", "Artifact", "Agent", "Person", 
+                "Position", "Entity", "Attacker", "Place", "Time-At-Beginning",
+                "Time-Within", "Victim", "Org", "Time-Holds", "Recipient", "Giver",
+                "Prosecutor", "Money", "Defendant", "Plaintiff", "Target", "Buyer",
+                "Instrument", "Beneficiary", "Seller", "Time-Ending", "Origin", 
+                "Time-At-End", "Time-Before", "Time-Starting", "Time-After", 
+                "Adjudicator", "Sentence", "Crime", "Price"]
+    
+    def get_loss_weights(self):
+        w = [0.01001257904112249, 0.0019755004178943192, 0.015356560940810969, 
+             0.00883065571417717, 0.014613637706731053, 0.0029632506268414786, 
+             0.01588842643793636, 0.012933618120573065, 0.02093692750588851, 
+             0.00045588471182176596, 0.011658829389367756, 0.014402579969776532, 
+             0.0028112890562342232, 0.0012325771838144043, 0.0030307891026669256, 
+             0.0031574237448396382, 0.00043900009286540427, 0.0018066542283307022, 
+             0.006812943748891947, 0.0019332888705034148, 0.012722560383618542, 
+             0.0020092696558070425, 0.005926501253682957, 0.0003461346886054149, 
+             0.0007260386151235533, 0.00033769237912723406, 0.0028619429131033084, 
+             0.00045588471182176596, 0.00047276933077812765, 0.0007091539961671915, 
+             0.00037146161703995745, 0.002380731272847, 0.0019755004178943192, 
+             0.007775367029404564, 0.0002954808317363298]
+        return w
+
+    def _create_examples(self, lines, set_type):
+        """Creates examples for the training and dev sets."""
+        # this is multi binary-classification, each token have one 0,1 label for each role.
+        examples = []
+        for (i, line) in enumerate(lines):
+            # Ignore the first line.
+            # if i == 0:
+            #     continue
+            guid = "%s-%s" % (set_type, i)
+            
+            (tokens, trigger_start_idx, trigger_end_idx, event_type), labels_lol = line[:4], line[4:]
+            assert len(tokens.split()) == len(labels_lol) # labels list and token length not match!
+
+            tokens_a = tokenization.convert_to_unicode(tokens)
+            if set_type == "test":
+                labels = [[] for _ in len(tokens_a.split())]
+            else:
+                labels = [tokenization.convert_to_unicode(x) for x in labels_lol]
+            trigger_pos = (int(trigger_start_idx), int(trigger_end_idx))
+            examples.append(
+                InputExample(guid=guid, tokens_a=tokens_a, labels=labels, seg2_pos=trigger_pos))
+        return examples
+
+
 def convert_single_example(ex_index, example, label_list, max_seq_length,
-                           tokenizer):
+                           tokenizer, task_type):
     """Converts a single `InputExample` into a single `InputFeatures`."""
+    tokens_a = example.tokens_a.split()
+    
     label_map = {}
     for (i, label) in enumerate(label_list):
         label_map[label] = i
+    
+    if task_type == "MCC":
+        # for a single token, lable is a str
+        def label_to_ids(label):
+            return label_map[label]
 
-    tokens_a = example.tokens_a.split()
-    labels = example.labels.split()
+        padding_label_ids = 0
+        
+        labels = example.labels.split()
+    
+    elif task_type == "MBCC":
+        # for a single token, label is a list of str
+        def label_to_ids(classes):
+            mb_label = [0] * len(label_list)
+            for one in classes:
+                mb_label[label_map[one]] = 1
+            return mb_label
+        padding_label_ids = label_to_ids([])
+        
+        labels = [x.split() for x in example.labels]
+
+    if example.seg2_pos is not None:
+        seg2_start_idx, seg2_end_idx = example.seg2_pos
+        assert seg2_start_idx <= len(tokens_a) and seg2_end_idx <= len(tokens_a)
+
     assert (len(tokens_a) == len(labels))
 
     # The convention in BERT is:
@@ -431,21 +404,26 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
 
     tokens.append("[CLS]")
     segment_ids.append(0)
-    label_ids.append(0)
+
+    label_ids.append(padding_label_ids)
+
     orig_to_tok_map.append(0)
 
-    for token, label in zip(tokens_a, labels):
+    for idx, (token, label) in enumerate(zip(tokens_a, labels)):
         word_token = tokenizer.tokenize(token)
         if len(tokens) + len(word_token) < max_seq_length - 1:
-            segment_ids.extend([0] * len(word_token))
+            seg_id = 1 \
+                     if (example.seg2_pos is not None) and (seg2_start_idx <= idx and idx <= seg2_end_idx) \
+                else 0
+            segment_ids.extend([seg_id] * len(word_token))
             orig_to_tok_map.append(len(tokens))
-            label_ids.append(label_map[label])
+            label_ids.append(label_to_ids(label))
             tokens.extend(word_token)
 
 
     tokens.append("[SEP]")
     segment_ids.append(0)
-    label_ids.append(0)
+    label_ids.append(padding_label_ids)
     orig_to_tok_map.append(0)
 
     input_ids = tokenizer.convert_tokens_to_ids(tokens)
@@ -463,7 +441,7 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
     
     while len(orig_to_tok_map) < max_seq_length:
         orig_to_tok_map.append(0)
-        label_ids.append(0)
+        label_ids.append(padding_label_ids)
         output_mask.append(0)
 
     assert len(input_ids) == max_seq_length
@@ -485,6 +463,11 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
         tf.logging.info("orig_to_tok_map %s" % " ".join([str(x) for x in orig_to_tok_map]))
         tf.logging.info("output_mask: %s" % " ".join([str(x) for x in output_mask]))
 
+    # np.train.Feature only support 1-D data, if do MBCC, flatten the labels
+    # see https://stackoverflow.com/a/47874627 
+    label_ids = np.array(label_ids)
+    label_ids = label_ids.reshape(-1)
+
     feature = InputFeatures(
         input_ids=input_ids,
         input_mask=input_mask,
@@ -497,7 +480,7 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
 
 
 def file_based_convert_examples_to_features(
-        examples, label_list, max_seq_length, tokenizer, output_file):
+        examples, label_list, max_seq_length, tokenizer, output_file, task_type):
     """Convert a set of `InputExample`s to a TFRecord file."""
 
     writer = tf.python_io.TFRecordWriter(output_file)
@@ -507,7 +490,7 @@ def file_based_convert_examples_to_features(
             tf.logging.info("Writing example %d of %d" % (ex_index, len(examples)))
 
         feature = convert_single_example(ex_index, example, label_list,
-                                         max_seq_length, tokenizer)
+                                         max_seq_length, tokenizer, task_type)
 
         def create_int_feature(values):
             f = tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
@@ -527,14 +510,23 @@ def file_based_convert_examples_to_features(
 
 
 def file_based_input_fn_builder(input_file, seq_length, is_training,
-                                drop_remainder, batch_size):
+                                drop_remainder, batch_size, task_type, num_labels):
     """Creates an `input_fn` closure to be passed to TPUEstimator."""
+
+    if task_type == "MCC":
+        label_ids_shape = [seq_length]
+    elif task_type == "MBCC":
+        # covert flatten lable_ids back to 2D
+        # !!!!!!!!!!!!!!!!!!!!!!!
+        # !!!  is this right?? 
+        # !!!!!!!!!!!!!!!!!!!!!!!
+        label_ids_shape = [seq_length, num_labels]
 
     name_to_features = {
         "input_ids": tf.FixedLenFeature([seq_length], tf.int64),
         "input_mask": tf.FixedLenFeature([seq_length], tf.int64),
         "segment_ids": tf.FixedLenFeature([seq_length], tf.int64),
-        "label_ids": tf.FixedLenFeature([seq_length], tf.int64),
+        "label_ids": tf.FixedLenFeature(label_ids_shape, tf.int64),
         "orig_to_tok_map": tf.FixedLenFeature([seq_length], tf.int64), 
         "output_mask": tf.FixedLenFeature([seq_length], tf.int64),
         "seq_len": tf.FixedLenFeature([], tf.int64)
@@ -593,8 +585,9 @@ def _truncate_seq_pair(tokens_a, tokens_b, max_length):
             tokens_b.pop()
 
 
+
 def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, label_ids, orig_to_tok_map,
-                 output_mask, num_labels, use_one_hot_embeddings, fp16, loss_weights):
+                 output_mask, num_labels, use_one_hot_embeddings, fp16, loss_weights, task_type):
     """Creates a classification model."""
     comp_type = tf.float16 if fp16 else tf.float32
     model = modeling.BertModel(
@@ -618,7 +611,6 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
     hidden_size = output_layer.shape[-1].value
 
     mid_size = 4096 
-
     output_mid_weights = tf.get_variable(
         "output_mid_weights", [mid_size, hidden_size],
         initializer=tf.truncated_normal_initializer(stddev=0.02))
@@ -656,32 +648,49 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
         logits = tf.batch_gather(logits, orig_to_tok_map)                   # [ batch_size, seq_len, num_labels]
 
 
-        # prevent nan loss during training.
-        #epsilon = tf.constant(value=1e-8, shape=logist.shape)
-        #logist = logist + epsilon
-        logits = tf.clip_by_value(logits, 1e-10, 1e10)
+        if task_type == "MCC":
+            # prevent nan loss during training.
+            #epsilon = tf.constant(value=1e-8, shape=logist.shape)
+            #logist = logist + epsilon
+            logits = tf.clip_by_value(logits, 1e-10, 1e10)
 
-        log_probs = tf.nn.log_softmax(logits, axis=-1)                      #[ batch_size, seq_len, num_labels]
-        predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)      #[ batch_size, seq_len]
+            log_probs = tf.nn.log_softmax(logits, axis=-1)                      #[ batch_size, seq_len, num_labels]
+            predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)      #[ batch_size, seq_len]
 
-        if loss_weights is not None:
-            log_probs = log_probs * loss_weights
+            if loss_weights is not None:
+                log_probs = log_probs * loss_weights
 
-        mask = tf.expand_dims(output_mask, -1)                              # [batch_size, seq_len, 1]
-        log_probs = log_probs * mask                                        # [ batch_size, seq_len, num_labels]
+            mask = tf.expand_dims(output_mask, -1)                              # [batch_size, seq_len, 1]
+            log_probs = log_probs * mask                                        # [ batch_size, seq_len, num_labels]
 
-        # label_ids [batch_size, seq_len]
-        one_hot_labels = tf.one_hot(label_ids, depth=num_labels, dtype=tf.float32)  #[batch_size, seq_len, num_lab]
-        # one_hot_labels * log_probs         [batch_size, seq_len, num_labels]
-        per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)      #[batch_size, seq_len]
-        loss = tf.reduce_mean(per_example_loss)                                        #[]
+            # label_ids [batch_size, seq_len]
+            one_hot_labels = tf.one_hot(label_ids, depth=num_labels, dtype=tf.float32)  #[batch_size, seq_len, num_lab]
+            # one_hot_labels * log_probs         [batch_size, seq_len, num_labels]
+            per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)      #[batch_size, seq_len]
+            loss = tf.reduce_mean(per_example_loss)                                        #[]
+        elif task_type == "MBCC":
+            #https://www.zybuluo.com/Antosny/note/917363
+            #https://www.tensorflow.org/versions/r1.14/api_docs/python/tf/nn/sigmoid_cross_entropy_with_logits
+            # TODO 1. prevent nan loss.  2. weights.
+            probs = tf.nn.sigmoid(logits)
 
+            threshold = tf.constant(0.5, shape=probs.shape, dtype=probs.dtype)
+            predictions = tf.greater(probs, threshold)  
+            predictions = tf.dtypes.cast(predictions, dtype=tf.int32) # convert from bool to int.
+            
+            # label_ids [batch_size, seq_len, num_labels]
+            label_ids = tf.dtypes.cast(label_ids, dtype=tf.float32)
+            per_token_loss = label_ids *  (-tf.log(probs)) + (1 - label_ids) * (-tf.log(1 - probs))
+            mask = tf.expand_dims(output_mask, -1)                              # [batch_size, seq_len, 1]
+            per_token_loss = per_token_loss * mask                              # [ batch_size, seq_len, num_labels]
+            per_example_loss = tf.reduce_sum(per_token_loss, axis=-1)
+            loss = tf.reduce_mean(per_example_loss)
         return (loss, per_example_loss, predictions)
 
 
 def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
-                     use_one_hot_embeddings, use_gpu, num_gpu_cores, fp16, loss_weights):
+                     use_one_hot_embeddings, use_gpu, num_gpu_cores, fp16, loss_weights, task_type):
     """Returns `model_fn` closure for TPUEstimator."""
 
     def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
@@ -704,7 +713,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
 
         (total_loss, per_example_loss, predictions) = create_model(
             bert_config, is_training, input_ids, input_mask, segment_ids, label_ids, orig_to_tok_map, output_mask_float,
-            num_labels, use_one_hot_embeddings, fp16, loss_weights)
+            num_labels, use_one_hot_embeddings, fp16, loss_weights, task_type)
 
         tvars = tf.trainable_variables()
         
@@ -753,19 +762,24 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                     training_hooks=[logging_hook],
                     scaffold_fn=scaffold_fn)
         elif mode == tf.estimator.ModeKeys.EVAL:
-            
-            def eval_confusion_matrix(label_ids, predictions, output_mask):
-                with tf.variable_scope("eval_confusion_matrix"):
-                    label_ids = tf.reshape(label_ids, [-1])
-                    predictions = tf.reshape(predictions, [-1])
-                    output_mask = tf.reshape(output_mask, [-1])
-                    confusion_matrix = tf.confusion_matrix(labels=label_ids, predictions=predictions, num_classes=num_labels, weights=output_mask)
-                    confusion_matrix_sum = tf.Variable(tf.zeros(shape=(num_labels, num_labels), dtype=tf.int32),
-                                                       name="confusion_matrix_result",
-                                                       collections=[tf.GraphKeys.LOCAL_VARIABLES],
-                                                       aggregation=tf.VariableAggregation.SUM)
-                    update_op = tf.assign_add(confusion_matrix_sum, confusion_matrix)
-                    return tf.convert_to_tensor(confusion_matrix_sum), update_op
+            if task_type == "MCC":
+                # see https://stackoverflow.com/a/46589128
+                def eval_confusion_matrix(label_ids, predictions, output_mask):
+                    with tf.variable_scope("eval_confusion_matrix"):
+                        label_ids = tf.reshape(label_ids, [-1])
+                       predictions = tf.reshape(predictions, [-1])
+                        output_mask = tf.reshape(output_mask, [-1])
+                        confusion_matrix = tf.confusion_matrix(labels=label_ids, predictions=predictions, num_classes=num_labels, weights=output_mask)
+                        confusion_matrix_sum = tf.Variable(tf.zeros(shape=(num_labels, num_labels), dtype=tf.int32),
+                                                           name="confusion_matrix_result",
+                                                           collections=[tf.GraphKeys.LOCAL_VARIABLES],
+                                                           aggregation=tf.VariableAggregation.SUM)
+                        update_op = tf.assign_add(confusion_matrix_sum, confusion_matrix)
+                        return tf.convert_to_tensor(confusion_matrix_sum), update_op
+            elif task_type == "MBCC":
+                def eval_confusion_matrix(label_ids, predictions, output_mask):
+                    # TODO
+                    raise NotImplementedError
 
             def metric_fn(per_example_loss, label_ids, predictions, output_mask):
                 accuracy = tf.metrics.accuracy(label_ids, predictions, output_mask)
@@ -830,10 +844,8 @@ def main(_):
     tf.logging.set_verbosity(tf.logging.INFO)
 
     processors = {
-        "named_entity": NamedEntityProcessor,
-        "punct": PunctProcessor,
-        "norm": NormProcessor,
-        'eet': EETrigerProcessor
+        'eet': EETrigerProcessor,
+        'eea': EEArgumentProcessor
     }
 
     if not FLAGS.do_train and not FLAGS.do_eval and not FLAGS.do_predict:
@@ -851,12 +863,12 @@ def main(_):
     tf.gfile.MakeDirs(FLAGS.output_dir)
 
     task_name = FLAGS.task_name.lower()
-
-    if task_name not in processors:
-        raise ValueError("Task not found: %s" % (task_name))
+    assert task_name in processors  # Task not found!
 
     processor = processors[task_name]()
 
+    task_type = processor.get_task_type()
+    assert task_type in ["MCC", "MBCC"]
     label_list = processor.get_labels()
     loss_weights = processor.get_loss_weights() if hasattr(processor, "get_loss_weights") else None
     
@@ -915,7 +927,8 @@ def main(_):
         use_gpu=FLAGS.use_gpu,
         num_gpu_cores=FLAGS.num_gpu_cores,
         fp16=FLAGS.use_fp16,
-        loss_weights=loss_weights)
+        loss_weights=loss_weights,
+        task_type=task_type)
 
     # If TPU is not available, this will fall back to normal Estimator on CPU
     # or GPU.
@@ -938,7 +951,7 @@ def main(_):
     if FLAGS.do_train:
         train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
         file_based_convert_examples_to_features(
-            train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
+            train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file, task_type)
         tf.logging.info("***** Running training *****")
         tf.logging.info("  Num examples = %d", len(train_examples))
         tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
@@ -948,7 +961,9 @@ def main(_):
             seq_length=FLAGS.max_seq_length,
             is_training=True,
             drop_remainder=True,
-            batch_size=FLAGS.train_batch_size)
+            batch_size=FLAGS.train_batch_size,
+            task_type=task_type,
+            num_labels=len(label_list))
         estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
 
     if FLAGS.do_eval:
@@ -976,7 +991,9 @@ def main(_):
             seq_length=FLAGS.max_seq_length,
             is_training=False,
             drop_remainder=eval_drop_remainder,
-            batch_size=FLAGS.eval_batch_size)
+            batch_size=FLAGS.eval_batch_size,
+            task_type=task_type,
+            num_labels=len(label_list))
 
         result = estimator.evaluate(input_fn=eval_input_fn, steps=eval_steps)
 
@@ -1012,7 +1029,9 @@ def main(_):
             seq_length=FLAGS.max_seq_length,
             is_training=False,
             drop_remainder=predict_drop_remainder,
-            batch_size=FLAGS.predict_batch_size)
+            batch_size=FLAGS.predict_batch_size,
+            task_type=task_type,
+            num_labels=len(label_list))
 
         result = estimator.predict(input_fn=predict_input_fn)
         output_predict_file = os.path.join(FLAGS.output_dir, "test_results.tsv")
@@ -1023,10 +1042,13 @@ def main(_):
                 seq_len = item['seq_len']
                 predictions = predictions[1:seq_len + 1]
                 labels = []
-                for pred in predictions:
-                    labels.append(label_list[pred])
-                writer.write(tokenization.printable_text(' '.join(labels)) + '\n')
-
+                if task_type == "MCC":
+                    for pred in predictions:
+                        labels.append(label_list[pred])
+                        writer.write(tokenization.printable_text(' '.join(labels)) + '\n')
+                elif task_type == "MBCC":
+                    # TODO
+                    raise NotImplementedError
     if FLAGS.do_train and FLAGS.save_for_serving:
         serving_dir = os.path.join(FLAGS.output_dir, 'serving')
         is_tpu_estimator = not FLAGS.use_gpu or int(FLAGS.num_gpu_cores) < 2
