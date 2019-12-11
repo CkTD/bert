@@ -235,6 +235,7 @@ class EETrigerProcessor(DataProcessor):
                 "Release-Parole", "Pardon", "Appeal", "Merge-Org", "Divorce", "Acquit", "Extradite"]
     
     def get_loss_weights(self):
+        # this is inverse weight
         w = [0.0008921577807340673, 1.628400340944748e-06, 0.0034411800114028308, 
              0.0060912841581153565, 0.04817652015963964, 0.0004120853201835428, 
              0.00281883894551083, 0.0022842315592932587, 0.008280339402438063, 
@@ -305,19 +306,27 @@ class EEArgumentProcessor(DataProcessor):
                 "Adjudicator", "Sentence", "Crime", "Price"]
     
     def get_loss_weights(self):
-        w = [0.01001257904112249, 0.0019755004178943192, 0.015356560940810969, 
-             0.00883065571417717, 0.014613637706731053, 0.0029632506268414786, 
-             0.01588842643793636, 0.012933618120573065, 0.02093692750588851, 
-             0.00045588471182176596, 0.011658829389367756, 0.014402579969776532, 
-             0.0028112890562342232, 0.0012325771838144043, 0.0030307891026669256, 
-             0.0031574237448396382, 0.00043900009286540427, 0.0018066542283307022, 
-             0.006812943748891947, 0.0019332888705034148, 0.012722560383618542, 
-             0.0020092696558070425, 0.005926501253682957, 0.0003461346886054149, 
-             0.0007260386151235533, 0.00033769237912723406, 0.0028619429131033084, 
-             0.00045588471182176596, 0.00047276933077812765, 0.0007091539961671915, 
-             0.00037146161703995745, 0.002380731272847, 0.0019755004178943192, 
-             0.007775367029404564, 0.0002954808317363298]
-        return w
+        nw = [0.01001257904112249, 0.0019755004178943192, 0.015356560940810969, 
+              0.00883065571417717, 0.014613637706731053, 0.0029632506268414786, 
+              0.01588842643793636, 0.012933618120573065, 0.02093692750588851, 
+              0.00045588471182176596, 0.011658829389367756, 0.014402579969776532, 
+              0.0028112890562342232, 0.0012325771838144043, 0.0030307891026669256, 
+              0.0031574237448396382, 0.00043900009286540427, 0.0018066542283307022, 
+              0.006812943748891947, 0.0019332888705034148, 0.012722560383618542, 
+              0.0020092696558070425, 0.005926501253682957, 0.0003461346886054149, 
+              0.0007260386151235533, 0.00033769237912723406, 0.0028619429131033084, 
+              0.00045588471182176596, 0.00047276933077812765, 0.0007091539961671915, 
+              0.00037146161703995745, 0.002380731272847, 0.0019755004178943192, 
+              0.007775367029404564, 0.0002954808317363298]
+        pw = [1 - x for x in nw]
+
+        pw = [math.sqrt(x) for x in pw]
+        nw = [math.sqrt(x) for x in nw]
+        
+        sw = [ p+n for p,n in zip(pw, nw)]
+        
+        pw = [ p/s for p,s in zip(pw, sw)] # positive weight
+        return pw
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
@@ -535,7 +544,6 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
     def _decode_record(record, name_to_features):
         """Decodes a record to a TensorFlow example."""
         example = tf.parse_single_example(record, name_to_features)
-
         # tf.Example only supports tf.int64, but the TPU only supports tf.int32.
         # So cast all int64 to int32.
         for name in list(example.keys()):
@@ -671,17 +679,29 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
         elif task_type == "MBCC":
             #https://www.zybuluo.com/Antosny/note/917363
             #https://www.tensorflow.org/versions/r1.14/api_docs/python/tf/nn/sigmoid_cross_entropy_with_logits
-            # TODO 1. prevent nan loss.  2. weights.
+            
+            logits = tf.clip_by_value(logits, -10, 10)
             probs = tf.nn.sigmoid(logits)
 
-            threshold = tf.constant(0.5, shape=probs.shape, dtype=probs.dtype)
+            threshold = tf.constant(0.5, dtype=tf.float32)
             predictions = tf.greater(probs, threshold)  
             predictions = tf.dtypes.cast(predictions, dtype=tf.int32) # convert from bool to int.
             
             # label_ids [batch_size, seq_len, num_labels]
             label_ids = tf.dtypes.cast(label_ids, dtype=tf.float32)
-            per_token_loss = label_ids *  (-tf.log(probs)) + (1 - label_ids) * (-tf.log(1 - probs))
-            mask = tf.expand_dims(output_mask, -1)                              # [batch_size, seq_len, 1]
+            #printop = tf.print(label_ids)
+            #with tf.control_dependencies([printop]):
+            #    per_token_loss = label_ids * (-tf.log(probs)) + (1 - label_ids) * (-tf.log(1 - probs))
+            if loss_weights is not None:
+                pw = loss_weights
+                nw = 1 - pw
+            else:
+                pw = 1
+                nw = 1
+            per_token_loss = pw * label_ids * (-tf.log(probs)) +  \
+                             nw * (1 - label_ids) * (-tf.log(1 - probs))
+            
+            mask = tf.expand_dims(output_mask, -1)                              # [ batch_size, seq_len, 1]
             per_token_loss = per_token_loss * mask                              # [ batch_size, seq_len, num_labels]
             per_example_loss = tf.reduce_sum(per_token_loss, axis=-1)
             loss = tf.reduce_mean(per_example_loss)
@@ -766,8 +786,10 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                 # see https://stackoverflow.com/a/46589128
                 def eval_confusion_matrix(label_ids, predictions, output_mask):
                     with tf.variable_scope("eval_confusion_matrix"):
+                        # label_ids [batch_size, seq_len]
                         label_ids = tf.reshape(label_ids, [-1])
-                       predictions = tf.reshape(predictions, [-1])
+                        predictions = tf.reshape(predictions, [-1])
+                        # output_mask [batch_size, seq_len]
                         output_mask = tf.reshape(output_mask, [-1])
                         confusion_matrix = tf.confusion_matrix(labels=label_ids, predictions=predictions, num_classes=num_labels, weights=output_mask)
                         confusion_matrix_sum = tf.Variable(tf.zeros(shape=(num_labels, num_labels), dtype=tf.int32),
@@ -778,8 +800,28 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                         return tf.convert_to_tensor(confusion_matrix_sum), update_op
             elif task_type == "MBCC":
                 def eval_confusion_matrix(label_ids, predictions, output_mask):
-                    # TODO
-                    raise NotImplementedError
+                    with tf.variable_scope("eval_confusion_matrix"):
+                        confusion_matrix_sum = tf.Variable(tf.zeros(shape=(num_labels, 2, 2), dtype=tf.int32),
+                                                           name="confusion_matrix_result",
+                                                           collections=[tf.GraphKeys.LOCAL_VARIABLES],
+                                                           aggregation=tf.VariableAggregation.SUM)
+                        # label_ids [batch_size, seq_len, num_labels]
+                        label_ids = tf.transpose(label_ids, [2, 0, 1])          # [num_labels, batch_size, seq_len]
+                        label_ids = tf.reshape(label_ids, [num_labels, -1])     # [num_labels, batch_size * seq_len]
+                        # predictions [batch_size, seq_len, num_labels]
+                        predictions = tf.transpose(predictions, [2, 0, 1])      # [num_labels, batch_size, seq_len]
+                        predictions = tf.reshape(predictions, [num_labels, -1]) # [num_labels, batch_size * seq_len]
+                        # output_mask [batch_size, seq_len]
+                        output_mask = tf.reshape(output_mask, [-1])             # [batch_size * seq_len]
+                        cms = []
+                        for idx in range(num_labels):
+                            cm = tf.confusion_matrix(labels=label_ids[idx], predictions=predictions[idx], num_classes=2, weights=output_mask)
+                            cms.append(cm)
+                        cms = [tf.expand_dims(x, axis=0) for x in cms]
+                        confusion_matrix = tf.concat(cms, axis=0)
+                        update_op = tf.assign_add(confusion_matrix_sum, confusion_matrix)
+                        
+                        return tf.convert_to_tensor(confusion_matrix_sum), update_op
 
             def metric_fn(per_example_loss, label_ids, predictions, output_mask):
                 accuracy = tf.metrics.accuracy(label_ids, predictions, output_mask)
@@ -970,7 +1012,7 @@ def main(_):
         eval_examples = processor.get_dev_examples(FLAGS.data_dir)
         eval_file = os.path.join(FLAGS.output_dir, "eval.tf_record")
         file_based_convert_examples_to_features(
-            eval_examples, label_list, FLAGS.max_seq_length, tokenizer, eval_file)
+            eval_examples, label_list, FLAGS.max_seq_length, tokenizer, eval_file, task_type)
 
         tf.logging.info("***** Running evaluation *****")
         tf.logging.info("  Num examples = %d", len(eval_examples))
@@ -1004,9 +1046,13 @@ def main(_):
             tf.logging.info("  %s = %s", key, str(result[key]))
             if not result[key].shape:
                 result[key] = numpy.array([result[key]])
-            fmt = "%d" if key == 'confusion_matrix' else "%f"
-            numpy.savetxt(output_eval_file+key, result[key], fmt=fmt)
-
+            if len(result[key].shape) < 3:
+                fmt = "%d" if key == 'confusion_matrix' else "%f"
+                # savetxt can only save 1D or 2D matrix!
+                numpy.savetxt(output_eval_file+key, result[key], fmt=fmt)
+            else:
+                numpy.save(output_eval_file+key, result[key])
+                
     if FLAGS.do_predict:
         predict_examples = processor.get_test_examples(FLAGS.data_dir)
         predict_file = os.path.join(FLAGS.output_dir, "predict.tf_record")
