@@ -16,4 +16,4 @@ python run_custom_seq_labeling.py \
   --use_gpu=true \
   --num_gpu_cores=1 \
   --use_fp16=true \
-  --output_dir=./output
+  --output_dir=./eea_direct

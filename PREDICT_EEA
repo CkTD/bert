@@ -8,7 +8,7 @@ python run_custom_seq_labeling.py \
   --data_dir=./data/eea \
   --vocab_file=./model_data/uncased_L-12_H-768_A-12/vocab.txt \
   --bert_config_file=./model_data/uncased_L-12_H-768_A-12/bert_config.json \
-  --init_checkpoint=./output/model.ckpt-10604 \
+  --init_checkpoint=./out_eea_direct/model.ckpt-2856 \
   --max_seq_length=128 \
   --train_batch_size=32 \
   --learning_rate=5e-5 \

@@ -343,7 +343,7 @@ class EEArgumentProcessor(DataProcessor):
 
             tokens_a = tokenization.convert_to_unicode(tokens)
             if set_type == "test":
-                labels = [[] for _ in len(tokens_a.split())]
+                labels = ['' for _ in range(len(tokens_a.split()))]
             else:
                 labels = [tokenization.convert_to_unicode(x) for x in labels_lol]
             trigger_pos = (int(trigger_start_idx), int(trigger_end_idx))
@@ -1046,19 +1046,17 @@ def main(_):
             tf.logging.info("  %s = %s", key, str(result[key]))
             if not result[key].shape:
                 result[key] = numpy.array([result[key]])
-            if len(result[key].shape) < 3:
-                fmt = "%d" if key == 'confusion_matrix' else "%f"
-                # savetxt can only save 1D or 2D matrix!
-                numpy.savetxt(output_eval_file+key, result[key], fmt=fmt)
-            else:
-                numpy.save(output_eval_file+key, result[key])
+            fmt = "%d" if key == 'confusion_matrix' else "%f"
+            if len(result[key].shape) == 3:
+                result[key] = result[key].reshape([-1, 4])
+            numpy.savetxt(output_eval_file+key, result[key], fmt=fmt)
                 
     if FLAGS.do_predict:
         predict_examples = processor.get_test_examples(FLAGS.data_dir)
         predict_file = os.path.join(FLAGS.output_dir, "predict.tf_record")
         file_based_convert_examples_to_features(predict_examples, label_list,
                                                 FLAGS.max_seq_length, tokenizer,
-                                                predict_file)
+                                                predict_file, task_type)
 
         tf.logging.info("***** Running prediction*****")
         tf.logging.info("  Num examples = %d", len(predict_examples))
@@ -1080,7 +1078,7 @@ def main(_):
             num_labels=len(label_list))
 
         result = estimator.predict(input_fn=predict_input_fn)
-        output_predict_file = os.path.join(FLAGS.output_dir, "test_results.tsv")
+        output_predict_file = os.path.join(FLAGS.output_dir, "predict_results.tsv")
         with tf.gfile.GFile(output_predict_file, "w") as writer:
             tf.logging.info("***** Predict results *****")
             for item in result:
@@ -1089,12 +1087,19 @@ def main(_):
                 predictions = predictions[1:seq_len + 1]
                 labels = []
                 if task_type == "MCC":
+                    # predictions [seq_len]
                     for pred in predictions:
                         labels.append(label_list[pred])
-                        writer.write(tokenization.printable_text(' '.join(labels)) + '\n')
+                    writer.write(tokenization.printable_text(' '.join(labels)) + '\n')
                 elif task_type == "MBCC":
-                    # TODO
-                    raise NotImplementedError
+                    # predictions [seq_len, num_labels]
+                    for pred in predictions:
+                        per_token_labels = [ label_list[cls] \
+                                           for cls, value in enumerate(pred) \
+                                           if value == 1 ]
+                        labels.append(' '.join(per_token_labels))
+                    writer.write(tokenization.printable_text('\t'.join(labels) + '\n'))
+                    
     if FLAGS.do_train and FLAGS.save_for_serving:
         serving_dir = os.path.join(FLAGS.output_dir, 'serving')
         is_tpu_estimator = not FLAGS.use_gpu or int(FLAGS.num_gpu_cores) < 2

@@ -22,10 +22,20 @@ labels = json.load(open(labels_path, 'r'))
 
 assert len(cm.shape) == 2 and cm.shape[0] == cm.shape[1] == len(labels)  # not match!
 
-
+counts = np.sum(cm,axis=1)
+# just ignore div 0 warning first, handle it if necessary later.
 precision = np.diag(cm) / np.sum(cm, axis=0)
 recall = np.diag(cm) / np.sum(cm, axis=1)
 f1 = 2 * precision*recall / (precision + recall)
+# if some label has data in our dataset. we need change any nan score to 0.
+for i in range(len(f1)):
+    if counts[i] != 0:
+        if np.isnan(precision[i]):
+            precision[i] = 0
+        if np.isnan(recall[i]):
+            recall[i] = 0
+        if np.isnan(f1[i]):
+            f1[i] = 0
 
 mp = np.nanmean(precision)
 mr = np.nanmean(recall)
@@ -50,13 +60,13 @@ micro_f1 = "%.5f" % micro_f1
 #precision = np.array2string(precision, formatter={'float_kind':lambda x: "%.2f" % x})
 #recall = np.array2string(recall, formatter={'float_kind':lambda x: "%.2f" % x})
 
-rows = list(zip(labels, precision, recall, f1))
-rows.append(["MACRO", mp, mr, mf1])
-rows.append(["MICRO", micro_p, micro_r, micro_f1])
+rows = list(zip(labels, precision, recall, f1, counts))
+rows.append(["MACRO", mp, mr, mf1, ""])
+rows.append(["MICRO", micro_p, micro_r, micro_f1, ""])
 
 string = tt.to_string(
     rows,
-    header=["Label", "Precision", "Recall", "F1"],
+    header=["Label", "Precision", "Recall", "F1","#RE"],
     style=tt.styles.ascii_thin_double,
     # alignment="ll",
     # padding=(0, 1),
