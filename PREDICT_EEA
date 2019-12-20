@@ -4,7 +4,6 @@ python run_custom_seq_labeling.py \
   --do_train=false \
   --do_eval=false \
   --do_predict=true \
-  --save_for_serving=false \
   --data_dir=./data/eea \
   --vocab_file=./model_data/uncased_L-12_H-768_A-12/vocab.txt \
   --bert_config_file=./model_data/uncased_L-12_H-768_A-12/bert_config.json \

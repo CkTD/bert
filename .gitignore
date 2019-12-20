@@ -1,7 +1,7 @@
 # Ignore all data, model and outpu files
 model_data
 data
-output
+output*
 out_*
 
 

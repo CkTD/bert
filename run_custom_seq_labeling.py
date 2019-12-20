@@ -31,10 +31,9 @@ import custom_modeling as modeling
 import optimization
 import custom_optimization
 import tokenization
-from tensorflow.python.distribute.cross_device_ops import AllReduceCrossDeviceOps
-import tensorflow as tf
-from tensorflow.python.estimator.run_config import RunConfig
-from tensorflow.python.estimator.estimator import Estimator
+
+# some useful code
+import utils
 
 flags = tf.flags
 
@@ -85,9 +84,10 @@ flags.DEFINE_bool(
     "do_predict", False,
     "Whether to run the model in inference mode on the test set.")
 
+# train_and_eval
 flags.DEFINE_bool(
-    "save_for_serving", False,
-    "Whether to save the model for tensorflow serving.")
+    "do_train_and_eval", False,
+    "")
 
 flags.DEFINE_integer("train_batch_size", 32, "Total batch size for training.")
 
@@ -105,7 +105,7 @@ flags.DEFINE_float(
     "Proportion of training to perform linear learning rate warmup for. "
     "E.g., 0.1 = 10% of training.")
 
-flags.DEFINE_integer("save_checkpoints_steps", 1000,
+flags.DEFINE_integer("save_checkpoints_steps", 2500,
                      "How often to save the model checkpoint.")
 
 flags.DEFINE_integer("iterations_per_loop", 1000,
@@ -137,13 +137,6 @@ flags.DEFINE_integer(
     "num_tpu_cores", 8,
     "Only used if `use_tpu` is True. Total number of TPU cores to use.")
 
-# Custom Config
-flags.DEFINE_bool("use_gpu", False, "Whether to use GPU.")
-
-flags.DEFINE_integer(
-    "num_gpu_cores", 0,
-    "Only used if `use_gpu` is True. Total number of GPU cores to use."
-)
 
 flags.DEFINE_bool("use_fp16", False, "Whether to use fp16.")
 
@@ -233,28 +226,6 @@ class EETrigerProcessor(DataProcessor):
                 "Trial-Hearing", "Start-Org", "Sue", "Transfer-Ownership", "Arrest-Jail", "Phone-Write", 
                 "Execute", "Sentence", "Be-Born", "Charge-Indict", "Declare-Bankruptcy", "Convict", 
                 "Release-Parole", "Pardon", "Appeal", "Merge-Org", "Divorce", "Acquit", "Extradite"]
-    
-    def get_loss_weights(self):
-        # this is inverse weight
-        w = [0.0008921577807340673, 1.628400340944748e-06, 0.0034411800114028308, 
-             0.0060912841581153565, 0.04817652015963964, 0.0004120853201835428, 
-             0.00281883894551083, 0.0022842315592932587, 0.008280339402438063, 
-             0.009635304031927928, 0.02523532008362076, 0.0010556608003108288, 
-             0.004529416425265265, 0.015586521228118705, 0.003354061530101494, 
-             0.006542490392049827, 0.01394583478305358, 0.008547447125097356, 
-             0.004774249745549874, 0.008280339402438063, 0.005195507076039569, 
-             0.03312135760975225, 0.006794124637897898, 0.01152047221208774, 
-             0.005954401368045348, 0.022080905073168167, 0.01059883443512072, 
-             0.013588249275795796, 0.264970860878018, 0.015586521228118705, 
-             0.037852980125431146, 0.02789166956610716, 0.1059883443512072,
-             0.264970860878018]
-        w = [math.sqrt(x) for x in w]
-        s = sum(w)
-        w = [x/s for x in w]
-        w = [x * len(w) * 50 for x in w]
-        print("Weights: \n", w)
-        
-        return w
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training and dev sets."""
@@ -460,7 +431,7 @@ def convert_single_example(ex_index, example, label_list, max_seq_length,
     assert len(orig_to_tok_map) == max_seq_length
     assert len(output_mask) == max_seq_length
 
-    if ex_index < 5:
+    if ex_index < 1:
         tf.logging.info("*** Example ***")
         tf.logging.info("guid: %s" % (example.guid))
         tf.logging.info("tokens: %s" % " ".join(
@@ -494,9 +465,10 @@ def file_based_convert_examples_to_features(
 
     writer = tf.python_io.TFRecordWriter(output_file)
 
+    tf.logging.info("Writing examples(%d)..." %  len(examples))
     for (ex_index, example) in enumerate(examples):
-        if ex_index % 10000 == 0:
-            tf.logging.info("Writing example %d of %d" % (ex_index, len(examples)))
+        #if ex_index % 10000 == 0:
+        #    tf.logging.info("Writing example %d of %d" % (ex_index, len(examples)))
 
         feature = convert_single_example(ex_index, example, label_list,
                                          max_seq_length, tokenizer, task_type)
@@ -526,9 +498,6 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
         label_ids_shape = [seq_length]
     elif task_type == "MBCC":
         # covert flatten lable_ids back to 2D
-        # !!!!!!!!!!!!!!!!!!!!!!!
-        # !!!  is this right?? 
-        # !!!!!!!!!!!!!!!!!!!!!!!
         label_ids_shape = [seq_length, num_labels]
 
     name_to_features = {
@@ -563,7 +532,9 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
         d = tf.data.TFRecordDataset(input_file)
         if is_training:
             d = d.repeat()
-            d = d.shuffle(buffer_size=100)
+            # buffer_size is important
+            # see https://stackoverflow.com/a/48096625
+            d = d.shuffle(buffer_size=20000)
 
         d = d.apply(
             tf.contrib.data.map_and_batch(
@@ -607,13 +578,11 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
         use_one_hot_embeddings=use_one_hot_embeddings,
         comp_type=comp_type)
 
-    # In the demo, we are doing a simple classification task on the entire
-    # segment.
-    #
-    # If you want to use the token-level output, use model.get_sequence_output()
-    # instead.
+    label_smoothing = False
+    my_label_smoothing = False 
+    assert not (label_smoothing and my_label_smoothing)
+    
     output_layer = model.get_sequence_output()               # [ batch_size, seq_len, hidden_size]
-
     seq_len = output_layer.shape[-2].value                   # this is the max_sqe_len!!!
                                                              # real_seq_len is the orig token len, which is also the real labels length
     hidden_size = output_layer.shape[-1].value
@@ -636,11 +605,13 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
     if loss_weights is not None:
         assert len(loss_weights) == num_labels
         loss_weights = tf.constant(loss_weights,dtype=tf.float32)
+    else:
+        loss_weights = 1
 
     with tf.variable_scope("loss"):
         if is_training:
             # I.e., 0.1 dropout
-            output_layer = tf.nn.dropout(output_layer, keep_prob=0.9)
+            output_layer = tf.nn.dropout(output_layer, keep_prob=0.5)
 
         output_layer = tf.reshape(output_layer, [-1, hidden_size])          #[ batch_size * seq_len, hidden_size]
         
@@ -654,32 +625,47 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
 
         #orig_to_tok_map # [batch_size, seq_len]
         logits = tf.batch_gather(logits, orig_to_tok_map)                   # [ batch_size, seq_len, num_labels]
+        mask = tf.expand_dims(output_mask, -1)                              # [ batch_size, seq_len, 1]
 
 
         if task_type == "MCC":
+
+            log_probs = tf.nn.log_softmax(logits, axis=-1)                               #[ batch_size, seq_len, num_labels]
             # prevent nan loss during training.
-            #epsilon = tf.constant(value=1e-8, shape=logist.shape)
-            #logist = logist + epsilon
-            logits = tf.clip_by_value(logits, 1e-10, 1e10)
-
-            log_probs = tf.nn.log_softmax(logits, axis=-1)                      #[ batch_size, seq_len, num_labels]
-            predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)      #[ batch_size, seq_len]
-
-            if loss_weights is not None:
-                log_probs = log_probs * loss_weights
-
-            mask = tf.expand_dims(output_mask, -1)                              # [batch_size, seq_len, 1]
-            log_probs = log_probs * mask                                        # [ batch_size, seq_len, num_labels]
+            # logsoftmax = logits - log(reduce_sum(exp(logits), axis)) 
+            # see https://www.tensorflow.org/api_docs/python/tf/nn/log_softmax?version=stable
+            log_probs = tf.clip_by_value(log_probs, -1e10, 0)
+            
+            if my_label_smoothing:
+                probs = tf.nn.softmax(logists, axis=-1)                                  #[ batch_size, seq_len, num_labels]
+                probs = probs * mask                                                     #[ batch_size, seq_len, num_labels]
+                true_labels = tf.one_hot(label_ids, depth=num_labels, dtype=tf.float32)  #[ batch_size, seq_len, num_labels]
+                true_probs = probs * true_labels                                         #[ batch_size, seq_len, num_labels]
+                true_prob = tf.reduce_sum(true_probs, axis=-1)                           #[ batch_size, seq_len]
+                where = tf.less(true_prob, 0.9)                                          #[ batch_size, seq_len]
+                smooth_mask = tf.cast(where, tf.float32)                                 #[ batch_size, seq_len]
+                smooth_mask = tf.expand_dim(smooth_mask, axis=-1)                        #[ batch_szie, seq_len, 1]
+                log_probs = log_probs * smooth_mask                                      #[ batch_size, seq_len, num_labels]
+            
+            # loss_weights  #[num_labels] or 1
+            log_probs = log_probs * loss_weights                                         #[ batch_size, seq_len, num_labels]
+            log_probs = log_probs * mask                                                 #[ batch_size, seq_len, num_labels]
 
             # label_ids [batch_size, seq_len]
-            one_hot_labels = tf.one_hot(label_ids, depth=num_labels, dtype=tf.float32)  #[batch_size, seq_len, num_lab]
+            one_hot_labels = tf.one_hot(label_ids, depth=num_labels, dtype=tf.float32)   #[ batch_size, seq_len, num_labels]
+           
+            if label_smoothing:
+                one_hot_labels = one_hot_labels * (0.9 - 0.1 / num_labels)
+                one_hot_labels = one_hot_labels + 0.1 / num_labels
+                
             # one_hot_labels * log_probs         [batch_size, seq_len, num_labels]
-            per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)      #[batch_size, seq_len]
-            loss = tf.reduce_mean(per_example_loss)                                        #[]
+            per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)      #[ batch_size, seq_len]
+            loss = tf.reduce_mean(per_example_loss)                                     #[]
+            predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)              #[ batch_size, seq_len]
+        
         elif task_type == "MBCC":
             #https://www.zybuluo.com/Antosny/note/917363
             #https://www.tensorflow.org/versions/r1.14/api_docs/python/tf/nn/sigmoid_cross_entropy_with_logits
-            
             logits = tf.clip_by_value(logits, -10, 10)
             probs = tf.nn.sigmoid(logits)
 
@@ -701,7 +687,6 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
             per_token_loss = pw * label_ids * (-tf.log(probs)) +  \
                              nw * (1 - label_ids) * (-tf.log(1 - probs))
             
-            mask = tf.expand_dims(output_mask, -1)                              # [ batch_size, seq_len, 1]
             per_token_loss = per_token_loss * mask                              # [ batch_size, seq_len, num_labels]
             per_example_loss = tf.reduce_sum(per_token_loss, axis=-1)
             loss = tf.reduce_mean(per_example_loss)
@@ -710,7 +695,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
 
 def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
-                     use_one_hot_embeddings, use_gpu, num_gpu_cores, fp16, loss_weights, task_type):
+                     use_one_hot_embeddings, fp16, loss_weights, task_type):
     """Returns `model_fn` closure for TPUEstimator."""
 
     def model_fn(features, labels, mode, params):  # pylint: disable=unused-argument
@@ -751,135 +736,66 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
             else:
                 tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
 
-        tf.logging.info("**** Trainable Variables ****")
-        for var in tvars:
-            init_string = ""
-            if var.name in initialized_variable_names:
-                init_string = ", *INIT_FROM_CKPT*"
-            tf.logging.info("  name = %s, shape = %s%s", var.name, var.shape,
-                            init_string)
+        #tf.logging.info("**** Trainable Variables ****")
+        #for var in tvars:
+        #    init_string = ""
+        #    if var.name in initialized_variable_names:
+        #        init_string = ", *INIT_FROM_CKPT*"
+        #    tf.logging.info("  name = %s, shape = %s%s", var.name, var.shape,
+        #                    init_string)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
-            if use_gpu and int(num_gpu_cores) >= 2:
-                train_op = custom_optimization.create_optimizer(
-                    total_loss, learning_rate, num_train_steps, num_warmup_steps, fp16=fp16)
-                output_spec = tf.estimator.EstimatorSpec(
-                    mode=mode,
-                    loss=total_loss,
-                    train_op=train_op,
-                    scaffold=scaffold_fn)
-            else:
-                train_op = optimization.create_optimizer(
-                    total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
+            train_op = optimization.create_optimizer(
+                total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
                 # Let TPUEstimator print loss during train
                 # use a logging hook. 
                 # see https://github.com/google-research/bert/issues/70
-                logging_hook = tf.train.LoggingTensorHook({"loss": total_loss}, every_n_iter=1)
-                output_spec = tf.contrib.tpu.TPUEstimatorSpec(
-                    mode=mode,
-                    loss=total_loss,
-                    train_op=train_op,
-                    training_hooks=[logging_hook],
-                    scaffold_fn=scaffold_fn)
+            logging_hook = tf.train.LoggingTensorHook({"loss": total_loss}, every_n_iter=1)
+            output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+                mode=mode,
+                loss=total_loss,
+                train_op=train_op,
+                training_hooks=[logging_hook],
+                scaffold_fn=scaffold_fn)
         elif mode == tf.estimator.ModeKeys.EVAL:
-            if task_type == "MCC":
-                # see https://stackoverflow.com/a/46589128
-                def eval_confusion_matrix(label_ids, predictions, output_mask):
-                    with tf.variable_scope("eval_confusion_matrix"):
-                        # label_ids [batch_size, seq_len]
-                        label_ids = tf.reshape(label_ids, [-1])
-                        predictions = tf.reshape(predictions, [-1])
-                        # output_mask [batch_size, seq_len]
-                        output_mask = tf.reshape(output_mask, [-1])
-                        confusion_matrix = tf.confusion_matrix(labels=label_ids, predictions=predictions, num_classes=num_labels, weights=output_mask)
-                        confusion_matrix_sum = tf.Variable(tf.zeros(shape=(num_labels, num_labels), dtype=tf.int32),
-                                                           name="confusion_matrix_result",
-                                                           collections=[tf.GraphKeys.LOCAL_VARIABLES],
-                                                           aggregation=tf.VariableAggregation.SUM)
-                        update_op = tf.assign_add(confusion_matrix_sum, confusion_matrix)
-                        return tf.convert_to_tensor(confusion_matrix_sum), update_op
-            elif task_type == "MBCC":
-                def eval_confusion_matrix(label_ids, predictions, output_mask):
-                    with tf.variable_scope("eval_confusion_matrix"):
-                        confusion_matrix_sum = tf.Variable(tf.zeros(shape=(num_labels, 2, 2), dtype=tf.int32),
-                                                           name="confusion_matrix_result",
-                                                           collections=[tf.GraphKeys.LOCAL_VARIABLES],
-                                                           aggregation=tf.VariableAggregation.SUM)
-                        # label_ids [batch_size, seq_len, num_labels]
-                        label_ids = tf.transpose(label_ids, [2, 0, 1])          # [num_labels, batch_size, seq_len]
-                        label_ids = tf.reshape(label_ids, [num_labels, -1])     # [num_labels, batch_size * seq_len]
-                        # predictions [batch_size, seq_len, num_labels]
-                        predictions = tf.transpose(predictions, [2, 0, 1])      # [num_labels, batch_size, seq_len]
-                        predictions = tf.reshape(predictions, [num_labels, -1]) # [num_labels, batch_size * seq_len]
-                        # output_mask [batch_size, seq_len]
-                        output_mask = tf.reshape(output_mask, [-1])             # [batch_size * seq_len]
-                        cms = []
-                        for idx in range(num_labels):
-                            cm = tf.confusion_matrix(labels=label_ids[idx], predictions=predictions[idx], num_classes=2, weights=output_mask)
-                            cms.append(cm)
-                        cms = [tf.expand_dims(x, axis=0) for x in cms]
-                        confusion_matrix = tf.concat(cms, axis=0)
-                        update_op = tf.assign_add(confusion_matrix_sum, confusion_matrix)
-                        
-                        return tf.convert_to_tensor(confusion_matrix_sum), update_op
-
             def metric_fn(per_example_loss, label_ids, predictions, output_mask):
                 accuracy = tf.metrics.accuracy(label_ids, predictions, output_mask)
                 loss = tf.metrics.mean(per_example_loss)
-                return {
-                    "eval_accuracy": accuracy,
-                    "eval_loss": loss,
-                    "confusion_matrix":eval_confusion_matrix(label_ids, predictions, output_mask)
-                }
+                if task_type == "MCC":
+                    return {
+                        "eval_accuracy": accuracy,
+                        "eval_loss": loss,
+                        "confusion_matrix":utils.metric.mcc_confusion_matrix(label_ids, predictions, output_mask, num_labels),
+                        "precision":utils.metric.mcc_precision(label_ids, predictions, output_mask, num_labels, 1),
+                        "recall":utils.metric.mcc_recall(label_ids, predictions, output_mask, num_labels, 1),
+                        "f1":utils.metric.mcc_f1(label_ids, predictions, output_mask, num_labels, 1),
+                    }
+                elif task_type == "MBCC":
+                    return {
+                        "eval_accuracy": accuracy,
+                        "eval_loss": loss,
+                        "confusion_matrix":utils.metric.mbcc_confusion_matrix(label_ids, predictions, output_mask, num_labels),
+                    }
 
             eval_metrics = (metric_fn, [per_example_loss, label_ids, predictions, output_mask])
-            if use_gpu and int(num_gpu_cores) >= 2:
-                output_spec = tf.estimator.EstimatorSpec(
-                    mode=mode,
-                    loss=total_loss,
-                    eval_metric_ops=eval_metrics[0](*eval_metrics[1]))
-            else:
-                output_spec = tf.contrib.tpu.TPUEstimatorSpec(
-                    mode=mode,
-                    loss=total_loss,
-                    eval_metrics=eval_metrics,
-                    scaffold_fn=scaffold_fn)
+            output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+                mode=mode,
+                loss=total_loss,
+                eval_metrics=eval_metrics,
+                scaffold_fn=scaffold_fn)
         else:
             predictions = {
                 "predictions": predictions,
                 "seq_len": seq_len
             }
-            if use_gpu and int(num_gpu_cores) >= 2:
-                output_spec = tf.estimator.EstimatorSpec(
-                    mode=mode,
-                    predictions=predictions)
-            else:
-                output_spec = tf.contrib.tpu.TPUEstimatorSpec(
-                    mode=mode,
-                    predictions=predictions,
-                    scaffold_fn=scaffold_fn)
+            output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+                mode=mode,
+                predictions=predictions,
+                scaffold_fn=scaffold_fn)
 
         return output_spec
 
     return model_fn
-
-
-def save_for_serving(estimator, serving_dir, seq_length, is_tpu_estimator):
-    feature_map = {
-        "input_ids": tf.placeholder(tf.int32, shape=[None, seq_length], name='input_ids'),
-        "input_mask": tf.placeholder(tf.int32, shape=[None, seq_length], name='input_mask'),
-        "segment_ids": tf.placeholder(tf.int32, shape=[None, seq_length], name='segment_ids'),
-        "label_ids": tf.placeholder(tf.int32, shape=[None, seq_length], name='label_ids'),
-        "output_mask": tf.placeholder(tf.int32, shape=[None, seq_length], name='label_ids'),
-        "seq_len": tf.placeholder(tf.int32, shape=[None], name='label_ids'),
-    }
-    serving_input_receiver_fn = tf.estimator.export.build_raw_serving_input_receiver_fn(feature_map)
-    if is_tpu_estimator:
-        # REF: https://github.com/google-research/bert/issues/146#issuecomment-441865716
-        estimator._export_to_tpu = False  # this is important
-    estimator.export_savedmodel(serving_dir,
-                                serving_input_receiver_fn,
-                                strip_default_attrs=True)
 
 
 def main(_):
@@ -890,7 +806,7 @@ def main(_):
         'eea': EEArgumentProcessor
     }
 
-    if not FLAGS.do_train and not FLAGS.do_eval and not FLAGS.do_predict:
+    if not FLAGS.do_train and not FLAGS.do_eval and not FLAGS.do_predict and not FLAGS.do_train_and_eval:
         raise ValueError(
             "At least one of `do_train`, `do_eval` or `do_predict' must be True.")
 
@@ -923,39 +839,29 @@ def main(_):
             FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
 
     is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
-    if FLAGS.use_gpu and int(FLAGS.num_gpu_cores) >= 2:
-        tf.logging.info("Use normal RunConfig")
-        dist_strategy = tf.contrib.distribute.MirroredStrategy(
-            num_gpus=FLAGS.num_gpu_cores,
-            cross_device_ops=AllReduceCrossDeviceOps('nccl', num_packs=FLAGS.num_gpu_cores),
-        )
-        log_every_n_steps = 1
-        run_config = RunConfig(
-            train_distribute=dist_strategy,
-            eval_distribute=dist_strategy,
-            log_step_count_steps=log_every_n_steps,
-            model_dir=FLAGS.output_dir,
-            save_checkpoints_steps=FLAGS.save_checkpoints_steps)
-    else:
-        tf.logging.info("Use TPURunConfig")
-        run_config = tf.contrib.tpu.RunConfig(
-            cluster=tpu_cluster_resolver,
-            master=FLAGS.master,
-            model_dir=FLAGS.output_dir,
-            save_checkpoints_steps=FLAGS.save_checkpoints_steps,
-            tpu_config=tf.contrib.tpu.TPUConfig(
-                iterations_per_loop=FLAGS.iterations_per_loop,
-                num_shards=FLAGS.num_tpu_cores,
-                per_host_input_for_training=is_per_host))
+    # https://www.tensorflow.org/api_docs/python/tf/estimator/RunConfig
+    run_config = tf.contrib.tpu.RunConfig(
+        cluster=tpu_cluster_resolver,
+        master=FLAGS.master,
+        model_dir=FLAGS.output_dir,
+        save_checkpoints_steps=FLAGS.save_checkpoints_steps,
+        keep_checkpoint_max=300,
+        save_summary_steps=50,
+        log_step_count_steps=10,
+        tpu_config=tf.contrib.tpu.TPUConfig(
+            iterations_per_loop=FLAGS.iterations_per_loop,
+            num_shards=FLAGS.num_tpu_cores,
+            per_host_input_for_training=is_per_host))
 
     train_examples = None
     num_train_steps = None
     num_warmup_steps = None
-    if FLAGS.do_train:
+    if FLAGS.do_train or FLAGS.do_train_and_eval:
         train_examples = processor.get_train_examples(FLAGS.data_dir)
         num_train_steps = int(
             len(train_examples) / FLAGS.train_batch_size * FLAGS.num_train_epochs)
         num_warmup_steps = int(num_train_steps * FLAGS.warmup_proportion)
+    
     init_checkpoint = FLAGS.init_checkpoint
     model_fn = model_fn_builder(
         bert_config=bert_config,
@@ -966,29 +872,20 @@ def main(_):
         num_warmup_steps=num_warmup_steps,
         use_tpu=FLAGS.use_tpu,
         use_one_hot_embeddings=FLAGS.use_tpu,
-        use_gpu=FLAGS.use_gpu,
-        num_gpu_cores=FLAGS.num_gpu_cores,
         fp16=FLAGS.use_fp16,
         loss_weights=loss_weights,
         task_type=task_type)
 
     # If TPU is not available, this will fall back to normal Estimator on CPU
     # or GPU.
-    if FLAGS.use_gpu and int(FLAGS.num_gpu_cores) >= 2:
-        tf.logging.info("Use normal Estimator")
-        estimator = Estimator(
-            model_fn=model_fn,
-            params={},
-            config=run_config)
-    else:
-        tf.logging.info("Use TPUEstimator")
-        estimator = tf.contrib.tpu.TPUEstimator(
-            use_tpu=FLAGS.use_tpu,
-            model_fn=model_fn,
-            config=run_config,
-            train_batch_size=FLAGS.train_batch_size,
-            eval_batch_size=FLAGS.eval_batch_size,
-            predict_batch_size=FLAGS.predict_batch_size)
+    estimator = tf.contrib.tpu.TPUEstimator(
+        use_tpu=FLAGS.use_tpu,
+        model_fn=model_fn,
+        config=run_config,
+        train_batch_size=FLAGS.train_batch_size,
+        eval_batch_size=FLAGS.eval_batch_size,
+        predict_batch_size=FLAGS.predict_batch_size)
+
 
     if FLAGS.do_train:
         train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
@@ -1007,6 +904,7 @@ def main(_):
             task_type=task_type,
             num_labels=len(label_list))
         estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
+
 
     if FLAGS.do_eval:
         eval_examples = processor.get_dev_examples(FLAGS.data_dir)
@@ -1050,7 +948,46 @@ def main(_):
             if len(result[key].shape) == 3:
                 result[key] = result[key].reshape([-1, 4])
             numpy.savetxt(output_eval_file+key, result[key], fmt=fmt)
-                
+    
+
+    if FLAGS.do_train_and_eval:
+        tf.logging.info("***** Running train_and_eval *****")
+        
+        train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
+        file_based_convert_examples_to_features(
+            train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file, task_type)
+        train_input_fn = file_based_input_fn_builder(
+            input_file=train_file,
+            seq_length=FLAGS.max_seq_length,
+            is_training=True,
+            drop_remainder=True,
+            batch_size=FLAGS.train_batch_size,
+            task_type=task_type,
+            num_labels=len(label_list))
+        
+        eval_examples = processor.get_dev_examples(FLAGS.data_dir)
+        eval_file = os.path.join(FLAGS.output_dir, "eval.tf_record")
+        file_based_convert_examples_to_features(
+            eval_examples, label_list, FLAGS.max_seq_length, tokenizer, eval_file, task_type)
+        eval_steps = eval_steps = int(len(eval_examples) / FLAGS.eval_batch_size) if FLAGS.use_tpu else None
+        eval_drop_remainder = True if FLAGS.use_tpu else False
+        eval_input_fn = file_based_input_fn_builder(
+            input_file=eval_file,
+            seq_length=FLAGS.max_seq_length,
+            is_training=False,
+            drop_remainder=eval_drop_remainder,
+            batch_size=FLAGS.eval_batch_size,
+            task_type=task_type,
+            num_labels=len(label_list))
+        
+        tf.logging.info("  Num train examples = %d", len(train_examples))
+        tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
+        tf.logging.info("  Num train steps = %d", num_train_steps)
+        tf.logging.info("  Num eval examples = %d", len(eval_examples))
+        train_spec = tf.estimator.TrainSpec(input_fn=train_input_fn, max_steps=num_train_steps)
+        eval_spec= tf.estimator.EvalSpec(input_fn=eval_input_fn, throttle_secs=10, steps=eval_steps)
+        tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)
+
     if FLAGS.do_predict:
         predict_examples = processor.get_test_examples(FLAGS.data_dir)
         predict_file = os.path.join(FLAGS.output_dir, "predict.tf_record")
@@ -1100,12 +1037,6 @@ def main(_):
                         labels.append(' '.join(per_token_labels))
                     writer.write(tokenization.printable_text('\t'.join(labels) + '\n'))
                     
-    if FLAGS.do_train and FLAGS.save_for_serving:
-        serving_dir = os.path.join(FLAGS.output_dir, 'serving')
-        is_tpu_estimator = not FLAGS.use_gpu or int(FLAGS.num_gpu_cores) < 2
-        save_for_serving(estimator, serving_dir, FLAGS.max_seq_length, is_tpu_estimator)
-
-
 if __name__ == "__main__":
     flags.mark_flag_as_required("data_dir")
     flags.mark_flag_as_required("task_name")
