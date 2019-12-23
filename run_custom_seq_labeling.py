@@ -660,7 +660,7 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids, l
                 
             # one_hot_labels * log_probs         [batch_size, seq_len, num_labels]
             per_example_loss = -tf.reduce_sum(one_hot_labels * log_probs, axis=-1)      #[ batch_size, seq_len]
-            loss = tf.reduce_mean(per_example_loss)                                     #[]
+            loss = tf.reduce_sum(per_example_loss) / tf.reduce_sum(mask)                #[]
             predictions = tf.argmax(logits, axis=-1, output_type=tf.int32)              #[ batch_size, seq_len]
         
         elif task_type == "MBCC":
@@ -760,7 +760,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
         elif mode == tf.estimator.ModeKeys.EVAL:
             def metric_fn(per_example_loss, label_ids, predictions, output_mask):
                 accuracy = tf.metrics.accuracy(label_ids, predictions, output_mask)
-                loss = tf.metrics.mean(per_example_loss)
+                loss = tf.metrics.mean(per_example_loss, output_mask)
                 if task_type == "MCC":
                     return {
                         "eval_accuracy": accuracy,
